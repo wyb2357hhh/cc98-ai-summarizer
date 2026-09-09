@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CC98 AI 总结 - 选项</title>
+  <style>
+    :root { --accent: #2f6fed; --border: #d0d7de; --muted: #6e7781; }
+    * { box-sizing: border-box; }
+    body { font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; max-width: 720px; margin: 0 auto; padding: 24px; color: #1f2328; }
+    h1 { font-size: 20px; }
+    h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin: 12px 0; }
+    legend { font-weight: 600; padding: 0 6px; }
+    label { display: block; margin: 10px 0; }
+    label .lbl { display: block; font-weight: 500; margin-bottom: 2px; }
+    label .hint { display: block; color: var(--muted); font-size: 12px; }
+    input[type="text"], input[type="password"], input[type="number"] {
+      width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font: inherit;
+    }
+    .row { display: flex; gap: 12px; }
+    .row > label { flex: 1; }
+    button { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 9px 18px; cursor: pointer; font: inherit; }
+    #status { margin-left: 12px; color: var(--muted); }
+    .note { color: var(--muted); font-size: 12px; }
+    code { background: #f6f8fa; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>CC98 AI 总结 — 选项</h1>
+
+  <h2>CC98 登录令牌</h2>
+  <fieldset>
+    <p class="note">
+      插件会<b>自动捕获</b>你在 cc98.org 页面浏览时使用的登录令牌（后台只读观察请求头，
+      不重新登录、不存账号密码，最不易触发风控）。正常浏览 cc98 任意页面即可自动获取，
+      面板顶行会显示「已就绪：用户名」。仅当自动捕获失效时才需手动粘贴：
+      cc98 页面 F12 → Network → 过滤 <code>api.cc98.org</code> → 点任意请求 →
+      Request Headers 里的 <code>authorization: Bearer …</code> 后面整串。
+    </p>
+    <label>
+      <span class="lbl">手动令牌（可选）</span>
+      <input type="password" id="cc98Token" placeholder="留空 = 使用自动检测" autocomplete="off" />
+      <span class="hint" id="tokenStatus">当前状态：读取中…</span>
+    </label>
+  </fieldset>
+
+  <h2>DeepSeek API</h2>
+  <fieldset>
+    <label>
+      <span class="lbl">API Key（必填）</span>
+      <input type="password" id="apiKey" placeholder="sk-…" autocomplete="off" />
+    </label>
+    <div class="row">
+      <label>
+        <span class="lbl">Base URL</span>
+        <input type="text" id="baseUrl" />
+      </label>
+      <label>
+        <span class="lbl">模型</span>
+        <input type="text" id="model" placeholder="deepseek-chat" />
+      </label>
+    </div>
+    <div class="row">
+      <label>
+        <span class="lbl">Temperature</span>
+        <input type="number" id="temperature" step="0.1" min="0" max="2" />
+      </label>
+      <label>
+        <span class="lbl">最大输出 token</span>
+        <input type="number" id="maxTokens" min="100" max="8000" />
+      </label>
+    </div>
+  </fieldset>
+
+  <h2>防封号 / 速度限制</h2>
+  <fieldset>
+    <p class="note">
+      插件始终<b>串行</b>请求（同一时刻仅 1 个），并在每次请求间随机等待。
+      间隔越大越安全但越慢；触发限流（429/403/5xx）时会自动指数退避重试。
+    </p>
+    <div class="row">
+      <label>
+        <span class="lbl">基础间隔（毫秒）</span>
+        <input type="number" id="baseDelayMs" min="0" max="60000" step="500" />
+      </label>
+      <label>
+        <span class="lbl">随机抖动上限（毫秒）</span>
+        <input type="number" id="jitterMs" min="0" max="60000" step="500" />
+      </label>
+    </div>
+    <div class="row">
+      <label>
+        <span class="lbl">每页楼层数（≤30）</span>
+        <input type="number" id="sizePerPage" min="1" max="30" />
+      </label>
+      <label>
+        <span class="lbl">每帖最大翻页数</span>
+        <input type="number" id="maxPages" min="1" max="50" />
+      </label>
+    </div>
+    <div class="row">
+      <label>
+        <span class="lbl">喂给 AI 的字符上限</span>
+        <input type="number" id="maxTotalChars" min="1000" max="200000" step="1000" />
+      </label>
+      <label>
+        <span class="lbl">限流重试次数</span>
+        <input type="number" id="maxRetries" min="1" max="10" />
+      </label>
+    </div>
+  </fieldset>
+
+  <button id="save">保存</button> <span id="status"></span>
+
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body { font: 13px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; width: 260px; margin: 0; padding: 14px; color: #1f2328; }
+    h1 { font-size: 15px; margin: 0 0 10px; }
+    .row { margin: 8px 0; }
+    .ok { color: #1a7f37; }
+    .bad { color: #cf222e; }
+    button { width: 100%; margin-top: 4px; padding: 8px; border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 6px; cursor: pointer; font: inherit; }
+    button.primary { background: #2f6fed; color: #fff; border-color: #2f6fed; }
+  </style>
+</head>
+<body>
+  <h1>CC98 AI 总结</h1>
+  <div class="row" id="token">令牌：读取中…</div>
+  <div class="row" id="ai">DeepSeek：读取中…</div>
+  <button class="primary" id="open">打开 cc98 论坛</button>
+  <button id="options">打开选项配置</button>
+  <script src="popup.js"></script>
+</body>
+</html>
