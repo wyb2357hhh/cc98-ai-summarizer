@@ -15,9 +15,11 @@ const DEFAULTS = {
     maxTokens: 2000
   },
   rate: {
-    baseDelayMs: 3000, // 每次请求基础间隔
+    baseDelayMs: 3000, // 每个帖子内部的翻页间隔
     jitterMs: 3000,    // 随机抖动上限（实际等待 = base + rand(0, jitter)）
-    sizePerPage: 20,   // 每页楼层数（API 上限 30）
+    concurrency: 2,    // 同时抓取的帖子数（像多开标签页）
+    globalSpacingMs: 250, // 全局请求最小间隔，防止并发请求同刻打出
+    sizePerPage: 30,   // 每页楼层数（API 上限 30，越大请求越少越快）
     maxPages: 5,       // 每帖最多翻页数
     maxTotalChars: 60000, // 喂给 AI 的总字符上限
     maxRetries: 3      // 触发限流时的最大重试次数
@@ -30,11 +32,32 @@ let settings = structuredClone(DEFAULTS);
 let running = false;
 let stopRequested = false;
 let activeTabId = null;
+let lastRequestAt = 0; // 全局请求节拍（毫秒时间戳）
+
+// 会话（材料 + 历史）同时落到 storage.session，避免 MV3 SW 重启后丢失
+const SESSION_KV = "cc98_ai_sessions";
+let sessions = new Map(); // sid -> { topic, material, history }
+
+async function loadSessions() {
+  try {
+    const got = await chrome.storage.session.get(SESSION_KV);
+    const raw = got[SESSION_KV];
+    if (raw) sessions = new Map(Object.entries(raw));
+  } catch (e) { sessions = new Map(); }
+}
+async function persistSessions() {
+  try {
+    await chrome.storage.session.set({
+      [SESSION_KV]: Object.fromEntries(sessions)
+    });
+  } catch (e) { /* 超出配额等场景静默忽略 */ }
+}
 
 init();
 
 async function init() {
   await loadSettings();
+  await loadSessions();
 
   // 被动捕获登录令牌：观察页面发往 api.cc98.org 的请求头（只读，不拦截不修改）
   chrome.webRequest.onBeforeSendHeaders.addListener(
@@ -158,6 +181,20 @@ async function handleMessage(msg, sender) {
       stopRequested = true;
       return { ok: true };
 
+    // 追问：使用该 session 已抓取的材料 + 累计对话历史（记忆上文与材料）
+    case "FOLLOWUP": {
+      const s = sessions.get(String(msg.sessionId || ""));
+      const question = String(msg.question || "").trim();
+      if (!s) return { error: "会话不存在或已失效，请重新总结" };
+      if (!question) return { error: "请输入问题" };
+      if (running) return { error: "已有任务在运行中" };
+      running = true;
+      stopRequested = false;
+      activeTabId = sender.tab ? sender.tab.id : null;
+      followup(s, question, activeTabId);
+      return { started: true };
+    }
+
     default:
       return { error: "未知消息类型: " + msg.type };
   }
@@ -203,47 +240,64 @@ async function verifyToken(token) {
 }
 
 // ---------------------------------------------------------------------------
-// 主流程：限速爬取 + 流式总结
+// 主流程：限速爬取 + 流式总结；并建立会话供追问使用
 // ---------------------------------------------------------------------------
 async function summarize(topic, items, tabId) {
   running = true;
   stopRequested = false;
-  const perTopic = [];
+  const perTopic = new Array(items.length);
+  const concurrency = clamp(settings.rate.concurrency || 1, 1, Math.max(1, items.length));
+  let next = 0;
+  let done = 0;
 
-  try {
-    for (let i = 0; i < items.length; i++) {
+  const runWorker = async () => {
+    while (true) {
       if (stopRequested) throw new Error("已停止");
-      const it = items[i];
+      const idx = next++;
+      if (idx >= items.length) break;
+      const it = items[idx];
       send(tabId, {
         type: "PROGRESS",
         phase: "crawl",
-        current: i,
+        current: done,
         total: items.length,
         message: `正在抓取「${it.title}」…`,
-        percent: Math.round((i / items.length) * 70)
+        percent: Math.round((done / items.length) * 70)
       });
 
       const text = await crawlTopic(it.id, it.title);
-      perTopic.push({ title: it.title || ("帖子 #" + it.id), text });
+      perTopic[idx] = { title: it.title || ("帖子 #" + it.id), text };
+      done++;
 
       send(tabId, {
         type: "PROGRESS",
         phase: "crawl",
-        current: i + 1,
+        current: done,
         total: items.length,
         message: `完成「${it.title}」（${text.length} 字）`,
-        percent: Math.round(((i + 1) / items.length) * 70)
+        percent: Math.round((done / items.length) * 70)
       });
     }
+  };
 
-    let combined = perTopic
+  try {
+    // 并发抓取多个帖子；每个帖子内部仍串行 + 慢速翻页
+    await Promise.all(
+      Array.from({ length: concurrency }, () => runWorker())
+    );
+
+    let material = perTopic
       .map((p) => `### ${p.title}\n${p.text}`)
       .join("\n\n");
-
-    // 总量截断，避免超长
-    if (combined.length > settings.rate.maxTotalChars) {
-      combined = combined.slice(0, settings.rate.maxTotalChars) + "\n\n…（内容过长已截断）";
+    if (material.length > settings.rate.maxTotalChars) {
+      material = material.slice(0, settings.rate.maxTotalChars) + "\n\n…（内容过长已截断）";
     }
+
+    // 建立会话（保存材料 + 空历史），供后续追问复用
+    const sid = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    const session = { topic, material, history: [] };
+    sessions.set(sid, session);
+    await persistSessions();
 
     send(tabId, {
       type: "PROGRESS",
@@ -252,36 +306,18 @@ async function summarize(topic, items, tabId) {
       percent: 85
     });
 
-    // 流式接收，缓冲后转发给页面，实现打字机式直接展示
-    let streamBuf = "";
-    let streamTimer = null;
-    const summary = await callDeepseekStream(topic, combined, (delta) => {
-      streamBuf += delta;
-      if (!streamTimer) {
-        streamTimer = setTimeout(() => {
-          const chunk = streamBuf;
-          streamBuf = "";
-          streamTimer = null;
-          send(tabId, { type: "STREAM_DELTA", delta: chunk });
-        }, 80);
-      }
-    });
-
-    // 收尾：冲刷剩余缓冲
-    if (streamTimer) {
-      clearTimeout(streamTimer);
-      streamTimer = null;
-    }
-    if (streamBuf) {
-      send(tabId, { type: "STREAM_DELTA", delta: streamBuf });
-      streamBuf = "";
-    }
+    const summary = await streamChatToPage(session, tabId, true);
+    // 记录首轮问答作为上下文，供后续追问记忆
+    session.history.push({ role: "user", content: `请总结：${topic}` });
+    session.history.push({ role: "assistant", content: summary });
+    await persistSessions();
 
     send(tabId, {
       type: "RESULT",
       topic,
       count: items.length,
-      summary
+      summary,
+      sessionId: sid
     });
   } catch (e) {
     send(tabId, { type: "ERROR", message: e && e.message ? e.message : String(e) });
@@ -291,26 +327,78 @@ async function summarize(topic, items, tabId) {
   }
 }
 
+// 追问单个开场
+async function followup(session, question, tabId) {
+  try {
+    session.history.push({ role: "user", content: question });
+    await persistSessions();
+    const answer = await streamChatToPage(session, tabId, false);
+    session.history.push({ role: "assistant", content: answer });
+    await persistSessions();
+    send(tabId, { type: "FOLLOWUP_DONE" });
+  } catch (e) {
+    session.history.pop(); // 回滚失败提问，保持历史一致
+    await persistSessions();
+    send(tabId, { type: "ERROR", message: e && e.message ? e.message : String(e) });
+  } finally {
+    running = false;
+    activeTabId = null;
+  }
+}
+
+// 依据 session 的材料 + 历史调用流式接口，并把增量(缓冲合并)推到页面
+async function streamChatToPage(session, tabId, isFirst) {
+  const messages = [];
+  const history = session.history;
+
+  // 填系统题外单上下文：材料始终在系统里，历史 Q/A 轮流追加
+  const materialBlock = history.length
+    ? [
+        `以下是已抓取的 CC98 帖子原文材料（只读，作为一切回答的依据，回答须完全基于它，不得编造）：`,
+        session.material
+      ].join("\n")
+    : session.material;
+
+  let system;
+  if (history.length) {
+    system =
+      "你是浙大 CC98 论坛内容分析助手。全程依据下面给出的「帖子材料」问答。" +
+      "要求：完全基于材料，不得编造材料之外的事实；只聚焦会话主题，无关内容忽略；" +
+      "精炼、无废话，直接答要点；标注楼层时注明（如“3楼”）。以下为材料：\n" + materialBlock;
+  } else {
+    system =
+      "你是浙大 CC98 论坛内容分析助手。硬性要求：精炼、信息密度高、杜绝废话——不要开场白、客套话、免责声明，不要复述问题，输出使用 Markdown。";
+  }
+
+  messages.push({ role: "system", content: system });
+  if (!history.length) {
+    messages.push({ role: "user", content: buildPrompt(session.topic, session.material) });
+  } else {
+    // 追问阶段：把历史问答带上（除最后一次已 push 的 user，其作为本次问题）
+    for (const h of history) messages.push({ role: h.role, content: h.content });
+  }
+
+  const full = await callDeepseek(messages);
+
+  if (isFirst) {
+    // result delivered by caller
+  }
+  return full;
+}
+
 async function crawlTopic(id, fallbackTitle) {
   const token = await ensureToken();
-
-  // 帖子元信息（拿到准确标题与总楼层数）
-  let meta = null;
-  try {
-    meta = await apiGet(`${API_BASE}/topic/${id}`, token);
-  } catch (e) {
-    /* 元信息失败不致命，继续按楼层抓 */
-  }
-  const title = (meta && meta.title) || fallbackTitle || ("帖子 #" + id);
-  const totalFloors = (meta && typeof meta.replyCount === "number" ? meta.replyCount : 0) + 1;
+  const title = fallbackTitle || ("帖子 #" + id);
 
   const size = clamp(settings.rate.sizePerPage, 1, 30);
   const maxPages = settings.rate.maxPages;
   const chunks = [];
-  let fetched = 0;
 
   for (let page = 0; page < maxPages; page++) {
     if (stopRequested) throw new Error("已停止");
+    // 每个帖子内部翻页仍保持"人读帖"节奏
+    await rateDelay();
+
     const from = page * size;
     const posts = await apiGet(
       `${API_BASE}/Topic/${id}/post?from=${from}&size=${size}`,
@@ -329,20 +417,19 @@ async function crawlTopic(id, fallbackTitle) {
       chunks.push(`【${p.floor}楼 · ${author}】\n${content}`);
     }
 
-    fetched += posts.length;
-    if (posts.length < size || fetched >= totalFloors) break;
+    if (posts.length < size) break;
   }
 
   if (!chunks.length) return `（「${title}」暂无可见内容）`;
-  return `标题：${title}\n总楼层约 ${totalFloors}\n\n` + chunks.join("\n\n");
+  return `标题：${title}\n\n` + chunks.join("\n\n");
 }
 
 // ---------------------------------------------------------------------------
 // 带限速 + 退避的 API 请求
 // ---------------------------------------------------------------------------
 async function apiGet(url, token) {
-  // 每次请求前先限速等待（串行 + 随机抖动）
-  await rateDelay();
+  // 全局最小间隔：并发抓取时仍避免多个请求同刻打出
+  await paceGlobal();
 
   let attempt = 0;
   let backoff = 10000;
@@ -386,16 +473,13 @@ async function ensureToken() {
 }
 
 // ---------------------------------------------------------------------------
-// DeepSeek（SSE 流式）
+// DeepSeek（SSE 流式，消息数组入参），缓冲转发到页面（打字机效果）
 // ---------------------------------------------------------------------------
-async function callDeepseekStream(topic, content, onDelta) {
+const PAGE_FLUSH_INTERVAL = 80; // ms
+
+async function callDeepseek(messages) {
   const ds = settings.deepseek;
   if (!ds.apiKey) throw new Error("未配置 DeepSeek API Key，请在扩展「选项」页填写。");
-
-  const system =
-    "你是浙大 CC98 论坛内容分析助手。硬性要求：精炼、信息密度高、杜绝废话——不要开场白、客套话、免责声明，不要复述问题，不要写“以下是总结/综上所述”之类空话，直接给出结论与观点。输出使用 Markdown。";
-
-  const user = buildPrompt(topic, content);
 
   const base = String(ds.baseUrl || "https://api.deepseek.com").replace(/\/+$/, "");
   const r = await fetch(`${base}/chat/completions`, {
@@ -406,10 +490,7 @@ async function callDeepseekStream(topic, content, onDelta) {
     },
     body: JSON.stringify({
       model: ds.model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user }
-      ],
+      messages,
       temperature: Number(ds.temperature) || 0.3,
       max_tokens: Number(ds.maxTokens) || 2000,
       stream: true
@@ -425,10 +506,30 @@ async function callDeepseekStream(topic, content, onDelta) {
   const decoder = new TextDecoder();
   let buf = "";
   let full = "";
+  let pageBuf = "";
+  let flushTimer = null;
+  const tabId = activeTabId;
+
+  const doFlush = () => {
+    if (pageBuf) {
+      send(tabId, { type: "STREAM_DELTA", delta: pageBuf });
+      pageBuf = "";
+    }
+  };
+  const schedule = () => {
+    if (!flushTimer) {
+      flushTimer = setTimeout(() => {
+        flushTimer = null;
+        doFlush();
+      }, PAGE_FLUSH_INTERVAL);
+    }
+  };
 
   while (true) {
     if (stopRequested) {
       try { await reader.cancel(); } catch (e) { /* 忽略 */ }
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      doFlush();
       throw new Error("已停止");
     }
     const { done, value } = await reader.read();
@@ -450,11 +551,15 @@ async function callDeepseekStream(topic, content, onDelta) {
             : "";
         if (delta) {
           full += delta;
-          onDelta(delta);
+          pageBuf += delta;
+          schedule();
         }
       } catch (e) { /* 跳过无法解析的行 */ }
     }
   }
+
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  doFlush();
 
   return full || "(空结果)";
 }
@@ -481,6 +586,16 @@ function buildPrompt(topic, content) {
 function rateDelay() {
   const { baseDelayMs, jitterMs } = settings.rate;
   return sleep((baseDelayMs || 0) + Math.random() * (jitterMs || 0));
+}
+
+// 全局节拍：保证任意两次请求之间至少有 globalSpacingMs 的间隔
+function paceGlobal() {
+  const now = Date.now();
+  const gap = settings.rate.globalSpacingMs || 0;
+  const target = lastRequestAt + gap;
+  lastRequestAt = Math.max(now, target);
+  const wait = lastRequestAt - now;
+  return wait > 0 ? sleep(wait) : Promise.resolve();
 }
 
 function sleep(ms) {

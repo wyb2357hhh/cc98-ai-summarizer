@@ -371,3 +371,78 @@
 #cc98-ai-panel .cc98-ai-head button {
   cursor: pointer;
 }
+
+/* ---- 快速选中前 N 的控制 ---- */
+.cc98-ai-list-tools {
+  align-items: center;
+}
+.cc98-ai-small {
+  border: 1px solid var(--cc98-border);
+  background: #f6f8fa;
+  color: var(--cc98-fg);
+  border-radius: 5px;
+  padding: 1px 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.cc98-small:hover {
+  background: #eaeef2;
+}
+input.cc98-num {
+  width: 42px;
+  border: 1px solid var(--cc98-border);
+  border-radius: 5px;
+  padding: 1px 4px;
+  font-size: 12px;
+  text-align: center;
+}
+.cc98-ai-list-tools > span {
+  color: var(--cc98-muted);
+  font-size: 12px;
+}
+
+/* ---- 追加追问的问答样式 ---- */
+.cc98-ai-md blockquote.cc98-ai-q {
+  background: #fff7e6;
+  border-left-color: #e8a33d;
+}
+.cc98-ai-md .cc98-ai-a {
+  /* 回复正文默认即可 */
+}
+
+/* ---- 输出窗底部追问输入区 ---- */
+.cc98-ai-out-foot {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--cc98-border);
+  background: #f6f8fa;
+}
+.cc98-ai-out-foot textarea {
+  flex: 1;
+  border: 1px solid var(--cc98-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--cc98-fg);
+  background: #fff;
+  resize: none;
+  min-height: 44px;
+}
+.cc98-ai-out-foot button {
+  border: 1px solid var(--cc98-accent);
+  background: var(--cc98-accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+.cc98-ai-out-foot button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

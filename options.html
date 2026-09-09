@@ -83,6 +83,7 @@
       <label>
         <span class="lbl">基础间隔（毫秒）</span>
         <input type="number" id="baseDelayMs" min="0" max="60000" step="500" />
+        <span class="hint">每个帖子内部翻页的间隔</span>
       </label>
       <label>
         <span class="lbl">随机抖动上限（毫秒）</span>
@@ -91,8 +92,21 @@
     </div>
     <div class="row">
       <label>
+        <span class="lbl">并发抓取帖子数（1–5）</span>
+        <input type="number" id="concurrency" min="1" max="5" />
+        <span class="hint">越大越快，但也更接近"多线程刷"；2 已接近真人多开标签页</span>
+      </label>
+      <label>
+        <span class="lbl">全局请求最小间隔（毫秒）</span>
+        <input type="number" id="globalSpacingMs" min="0" max="5000" step="100" />
+        <span class="hint">并发时防止多个请求同刻打出</span>
+      </label>
+    </div>
+    <div class="row">
+      <label>
         <span class="lbl">每页楼层数（≤30）</span>
         <input type="number" id="sizePerPage" min="1" max="30" />
+        <span class="hint">越大请求越少、越快</span>
       </label>
       <label>
         <span class="lbl">每帖最大翻页数</span>

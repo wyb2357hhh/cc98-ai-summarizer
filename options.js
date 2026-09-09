@@ -14,6 +14,8 @@ async function load() {
 
   $("baseDelayMs").value = s.rate.baseDelayMs;
   $("jitterMs").value = s.rate.jitterMs;
+  $("concurrency").value = s.rate.concurrency;
+  $("globalSpacingMs").value = s.rate.globalSpacingMs;
   $("sizePerPage").value = s.rate.sizePerPage;
   $("maxPages").value = s.rate.maxPages;
   $("maxTotalChars").value = s.rate.maxTotalChars;
@@ -26,23 +28,27 @@ async function load() {
 }
 
 $("save").addEventListener("click", async () => {
+  const num = (v, d) => { const n = parseInt(v, 10); return Number.isNaN(n) ? d : n; };
   const patch = {
     deepseek: {
       baseUrl: $("baseUrl").value.trim() || "https://api.deepseek.com",
       apiKey: $("apiKey").value.trim(),
       model: $("model").value.trim() || "deepseek-chat",
-      temperature: parseFloat($("temperature").value) || 0.3,
-      maxTokens: parseInt($("maxTokens").value, 10) || 2000
+      temperature: parseFloat($("temperature").value),
+      maxTokens: num($("maxTokens").value, 2000)
     },
     rate: {
-      baseDelayMs: parseInt($("baseDelayMs").value, 10) || 3000,
-      jitterMs: parseInt($("jitterMs").value, 10) || 3000,
-      sizePerPage: parseInt($("sizePerPage").value, 10) || 20,
-      maxPages: parseInt($("maxPages").value, 10) || 5,
-      maxTotalChars: parseInt($("maxTotalChars").value, 10) || 60000,
-      maxRetries: parseInt($("maxRetries").value, 10) || 3
+      baseDelayMs: num($("baseDelayMs").value, 3000),
+      jitterMs: num($("jitterMs").value, 3000),
+      concurrency: num($("concurrency").value, 2),
+      globalSpacingMs: num($("globalSpacingMs").value, 250),
+      sizePerPage: num($("sizePerPage").value, 30),
+      maxPages: num($("maxPages").value, 5),
+      maxTotalChars: num($("maxTotalChars").value, 60000),
+      maxRetries: num($("maxRetries").value, 3)
     }
   };
+  if (Number.isNaN(patch.deepseek.temperature)) patch.deepseek.temperature = 0.3;
   // 手动令牌：仅当填写时才覆盖
   const token = $("cc98Token").value.trim();
   if (token) patch.cc98Token = token;
