@@ -3,21 +3,53 @@
 <head>
   <meta charset="UTF-8" />
   <style>
-    body { font: 13px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; width: 260px; margin: 0; padding: 14px; color: #1f2328; }
-    h1 { font-size: 15px; margin: 0 0 10px; }
-    .row { margin: 8px 0; }
-    .ok { color: #1a7f37; }
-    .bad { color: #cf222e; }
-    button { width: 100%; margin-top: 4px; padding: 8px; border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 6px; cursor: pointer; font: inherit; }
-    button.primary { background: #2f6fed; color: #fff; border-color: #2f6fed; }
+    :root { --accent: #4f6ef7; --muted: #8a90a3; --border: #e6e8ef; }
+    * { box-sizing: border-box; }
+    body {
+      font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      width: 280px; margin: 0; padding: 0; color: #232733; background: #fff;
+    }
+    .head {
+      background: linear-gradient(135deg, #5b7cff, #6a54e8); color: #fff;
+      padding: 14px 16px;
+    }
+    .head h1 { margin: 0; font-size: 15px; font-weight: 700; }
+    .head .sub { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+    .body { padding: 12px 16px 16px; }
+    .row {
+      margin: 9px 0; padding: 8px 10px; border: 1px solid var(--border);
+      border-radius: 10px; background: #fbfbfe; font-size: 12.5px;
+    }
+    .row .k { color: var(--muted); margin-right: 4px; }
+    .ok { color: #18a05e; font-weight: 600; }
+    .bad { color: #d5485f; font-weight: 600; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+    .dot.ok { background: #2ecc71; box-shadow: 0 0 0 3px rgba(46,204,113,.18); }
+    .dot.bad { background: #ff6b7a; box-shadow: 0 0 0 3px rgba(255,107,122,.18); }
+    button {
+      width: 100%; margin-top: 6px; padding: 9px; border: 1px solid var(--border);
+      background: #f7f8fb; border-radius: 10px; cursor: pointer; font: inherit; font-weight: 500;
+      transition: background .13s ease, border-color .13s ease;
+    }
+    button:hover { background: #eef0f6; }
+    button.primary {
+      background: linear-gradient(135deg, #5b7cff, #6a54e8); color: #fff; border-color: transparent;
+      box-shadow: 0 3px 10px rgba(79,110,247,.3);
+    }
+    button.primary:hover { filter: brightness(1.05); }
   </style>
 </head>
 <body>
-  <h1>CC98 AI 总结</h1>
-  <div class="row" id="token">令牌：读取中…</div>
-  <div class="row" id="ai">DeepSeek：读取中…</div>
-  <button class="primary" id="open">打开 cc98 论坛</button>
-  <button id="options">打开选项配置</button>
+  <div class="head">
+    <h1>CC98 AI 总结</h1>
+    <div class="sub">勾选帖子 · 限速抓取 · DeepSeek 主题总结</div>
+  </div>
+  <div class="body">
+    <div class="row" id="token"><span class="k">令牌</span><span class="dot" id="tokDot"></span><span id="tokText">读取中…</span></div>
+    <div class="row" id="ai"><span class="k">DeepSeek</span><span class="dot" id="aiDot"></span><span id="aiText">读取中…</span></div>
+    <button class="primary" id="open">打开 cc98 论坛</button>
+    <button id="options">打开选项配置</button>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>

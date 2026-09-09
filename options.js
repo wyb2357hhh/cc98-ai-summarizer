@@ -56,10 +56,10 @@ $("save").addEventListener("click", async () => {
   const res = await chrome.runtime.sendMessage({ type: "SETTINGS", patch });
   if (token) {
     $("status").textContent = res && res.tokenSet
-      ? "令牌验证通过 ✔ 已就绪：" + (res.cc98Name || "")
-      : "令牌验证失败 ✘ 请确认复制完整（Bearer 后面整串）";
+      ? "令牌验证通过 已就绪：" + (res.cc98Name || "")
+      : "令牌验证失败 请确认复制完整（Bearer 后面整串）";
   } else {
-    $("status").textContent = "已保存 ✔";
+    $("status").textContent = "已保存";
   }
   setTimeout(() => ($("status").textContent = ""), 3000);
   load();

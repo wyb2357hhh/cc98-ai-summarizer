@@ -186,11 +186,11 @@
       </div>
       <div class="cc98-ai-body">
         <div class="cc98-ai-row">
-          <button id="cc98-ai-scan-btn" type="button" class="cc98-ai-scan-btn">🔄 扫描本页帖子</button>
+          <button id="cc98-ai-scan-btn" type="button" class="cc98-ai-scan-btn">扫描本页帖子</button>
           <button id="cc98-ai-clear" type="button" title="清空勾选">清空</button>
         </div>
         <div class="cc98-ai-row">
-          <button id="cc98-ai-load" type="button" class="cc98-ai-scan-btn" title="自动滚到底触发加载，直到目标条数">📥 自动加载更多</button>
+          <button id="cc98-ai-load" type="button" class="cc98-ai-scan-btn" title="自动滚到底触发加载，直到目标条数">自动加载更多</button>
           <input type="number" id="cc98-ai-loadn" value="60" min="20" max="1000" class="cc98-num" />
           <span>条</span>
         </div>
@@ -227,7 +227,7 @@
     <!-- 输出大悬浮窗 -->
     <div id="cc98-ai-out" hidden>
       <div class="cc98-ai-out-head">
-        <span class="cc98-ai-out-title" id="cc98-ai-out-title">📄 总结结果</span>
+        <span class="cc98-ai-out-title" id="cc98-ai-out-title">总结结果</span>
         <span class="cc98-ai-out-status" id="cc98-ai-out-status"></span>
         <button id="cc98-ai-out-copy" type="button">复制 Markdown</button>
         <button id="cc98-ai-out-close" type="button" title="关闭">×</button>
@@ -304,7 +304,7 @@
     try {
       const doc = state.committed + (state.raw ? "\n\n" + state.raw : "");
       await navigator.clipboard.writeText(doc || "");
-      outStatus("已复制 ✓");
+      outStatus("已复制");
       setTimeout(() => outStatus(state.running ? "生成中…" : "完成，可继续追问"), 1500);
     } catch (e) {
       outStatus("复制失败，请手动选中");
@@ -441,7 +441,7 @@
     $("cc98-ai-ask").disabled = true;
     // 打开输出窗占位
     showOut();
-    $("cc98-ai-out-title").textContent = "📄 " + topic;
+    $("cc98-ai-out-title").textContent = topic;
     outStatus("抓取帖子中…");
     outBody.innerHTML = '<div class="cc98-ai-md"><p class="cc98-ai-md-empty">正在限速抓取选中帖子…</p></div>';
 

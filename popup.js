@@ -1,12 +1,27 @@
 async function refresh() {
   const r = await chrome.runtime.sendMessage({ type: "GET_STATE" }).catch(() => null);
   if (!r) return;
-  document.getElementById("token").innerHTML = r.tokenSet
-    ? `令牌：<span class="ok">已就绪${r.cc98Name ? "（" + r.cc98Name + "）" : ""}</span>`
-    : `令牌：<span class="bad">未获取（请登录 cc98 并打开任意页面）</span>`;
-  document.getElementById("ai").innerHTML = r.deepseekConfigured
-    ? 'DeepSeek：<span class="ok">已配置</span>'
-    : 'DeepSeek：<span class="bad">未配置 API Key</span>';
+
+  const tokDot = document.getElementById("tokDot");
+  const tokText = document.getElementById("tokText");
+  const aiDot = document.getElementById("aiDot");
+  const aiText = document.getElementById("aiText");
+
+  if (r.tokenSet) {
+    tokDot.className = "dot ok";
+    tokText.innerHTML = `<span class="ok">已就绪${r.cc98Name ? "（" + r.cc98Name + "）" : ""}</span>`;
+  } else {
+    tokDot.className = "dot bad";
+    tokText.innerHTML = '<span class="bad">未获取（登录 cc98 后自动捕获）</span>';
+  }
+
+  if (r.deepseekConfigured) {
+    aiDot.className = "dot ok";
+    aiText.innerHTML = '<span class="ok">已配置</span>';
+  } else {
+    aiDot.className = "dot bad";
+    aiText.innerHTML = '<span class="bad">未配置 API Key</span>';
+  }
 }
 
 document.getElementById("open").addEventListener("click", () => {
