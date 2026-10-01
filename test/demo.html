@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CC98 AI 总结 — 渲染自测页</title>
+  <style>
+    :root { --accent:#4f6ef7; --border:#e6e8ef; --muted:#8a90a3; --bg:#f5f6fb; }
+    * { box-sizing: border-box; }
+    body { font: 14px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; background: var(--bg); color: #232733; }
+    .top { background: linear-gradient(135deg,#5b7cff,#6a54e8); color:#fff; padding: 18px 24px; }
+    .top h1 { margin:0; font-size:18px; } .top p { margin:4px 0 0; font-size:12px; opacity:.85; }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 20px 24px 60px; }
+    h2 { font-size:15px; margin:26px 0 8px; display:flex; align-items:center; gap:8px; }
+    h2::before { content:""; width:8px; height:8px; border-radius:50%; background:linear-gradient(135deg,#5b7cff,#7b5cf0); }
+    .card { background:#fff; border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin:8px 0; }
+    .floor { margin: 10px 0; }
+    .floor .head { font-weight:600; color:#3c4153; }
+    .floor .raw { background:#f5f6fa; border:1px solid var(--border); border-radius:8px; padding:8px 10px; font:12px/1.6 Consolas,Menlo,monospace; color:#6b7280; white-space:pre-wrap; word-break:break-all; margin:4px 0; }
+    .floor .clean { padding:4px 0 2px; white-space:pre-wrap; }
+    .badge { display:inline-block; font-size:11px; padding:0 6px; border-radius:6px; background:#eef1ff; color:#4f6ef7; margin-left:6px; }
+    .md { padding: 4px 2px; }
+    /* Markdown 渲染样式（与插件内 .cc98-ai-md 一致） */
+    .md h1{font-size:19px;margin:16px 0 8px}.md h2{font-size:17px;margin:14px 0 6px;border-bottom:1px solid var(--border);padding-bottom:4px}.md h3{font-size:15px;margin:12px 0 5px}
+    .md p{margin:6px 0}.md ul,.md ol{margin:6px 0;padding-left:22px}.md li{margin:3px 0}.md li::marker{color:var(--accent)}
+    .md code{background:#f5f6fa;border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-family:Consolas,Menlo,monospace;font-size:12.5px;color:#5a4bd0}
+    .md pre{background:#2b3040;border-radius:8px;padding:10px 12px;overflow-x:auto;color:#e6e8f0;margin:8px 0}
+    .md pre code{background:none;border:none;padding:0;color:inherit}
+    .md blockquote{margin:8px 0;padding:6px 12px;border-left:3px solid var(--accent);background:#eef1ff;border-radius:0 6px 6px 0;color:#3c4153}
+    .md strong{font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h1>CC98 AI 总结 — 渲染自测页</h1>
+    <p>离线验证 UBB 清洗与 Markdown 渲染效果，数据见 test/mock-data.js</p>
+  </div>
+
+  <div class="wrap">
+    <h2>一、楼层 UBB 清洗（原始 → 纯文本）</h2>
+    <div id="floors"></div>
+
+    <h2>二、AI 答案 Markdown 渲染</h2>
+    <div class="card">
+      <div class="md" id="answer"></div>
+    </div>
+
+    <h2>三、搜索候选列表（模拟）</h2>
+    <div class="card" id="results"></div>
+  </div>
+
+  <script>
+    // ---- 与 background.js 一致的 UBB 清洗 ----
+    function ubbToText(content) {
+      let text = String(content || "");
+      text = text.replace(/\[img\]([\s\S]*?)\[\/img\]/gi, "[图片: $1]");
+      text = text.replace(/\[video\]([\s\S]*?)\[\/video\]/gi, "[视频: $1]");
+      text = text.replace(/\[audio\]([\s\S]*?)\[\/audio\]/gi, "[音频: $1]");
+      text = text.replace(/\[upload(?:=[^\]]*)?\]([\s\S]*?)\[\/upload\]/gi, "[文件: $1]");
+      text = text.replace(/\[upload(?:=[^\]]*)?\](https?:\/\/\S+)/gi, "[文件: $1]");
+      text = text.replace(/\[url=([^\]]*)\]([\s\S]*?)\[\/url\]/gi, "$2 ($1)");
+      text = text.replace(/\[url\]([\s\S]*?)\[\/url\]/gi, "$1");
+      text = text.replace(/\[quote\]/gi, "\n> [引用] ");
+      text = text.replace(/\[\/quote\]/gi, "\n");
+      text = text.replace(/\[\/?(b|i|u|del|center|left|right|line|noubb)\]/gi, "");
+      text = text.replace(/\[(color|size|font|align|bg|sound|upload)=[^\]]*\]/gi, "");
+      text = text.replace(/\[\/(color|size|font|align|bg|sound|upload)\]/gi, "");
+      text = text.replace(/\[(ac|em|cc98|tb|ms)\d+\]/gi, "[表情]");
+      text = text.replace(/\n{3,}/g, "\n\n").trim();
+      return text;
+    }
+
+    // ---- 与 content.js 一致的 Markdown 渲染 ----
+    function escapeHtml(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    }
+    function mdInline(s) {
+      return s
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+    }
+    function mdToHtml(md) {
+      const lines = String(md || "").split(/\r?\n/);
+      const html = [];
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
+        if (/^```/.test(line)) {
+          const buf = []; i++;
+          while (i < lines.length && !/^```/.test(lines[i])) { buf.push(escapeHtml(lines[i])); i++; }
+          i++; html.push("<pre><code>" + buf.join("\n") + "</code></pre>"); continue;
+        }
+        let m;
+        if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+          html.push(`<h${m[1].length}>${mdInline(escapeHtml(m[2]))}</h${m[1].length}>`); i++; continue;
+        }
+        if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { html.push("<hr>"); i++; continue; }
+        if (!line.trim()) { i++; continue; }
+        if (/^\s*>\s?/.test(line)) {
+          const buf = [];
+          while (i < lines.length && /^\s*>/.test(lines[i])) { buf.push(mdInline(escapeHtml(lines[i].replace(/^\s*>\s?/, "")))); i++; }
+          html.push("<blockquote>" + buf.join("<br>") + "</blockquote>"); continue;
+        }
+        if (/^\s*(?:[-*+]|\d+[.)])\s+/.test(line)) {
+          const ordered = /^\s*\d+[.)]\s+/.test(line);
+          const items = [];
+          while (i < lines.length) {
+            const mm = lines[i].match(/^\s*(?:[-*+]|\d+[.)])\s+(.*)$/);
+            if (!mm) break;
+            items.push("<li>" + mdInline(escapeHtml(mm[1])) + "</li>"); i++;
+          }
+          html.push(`<${ordered ? "ol" : "ul"}>` + items.join("") + `</${ordered ? "ol" : "ul"}>`); continue;
+        }
+        const buf = [];
+        while (i < lines.length && lines[i].trim()) { buf.push(lines[i]); i++; }
+        html.push("<p>" + mdInline(escapeHtml(buf.join(" "))) + "</p>");
+      }
+      return html.join("\n");
+    }
+
+    // ---- 内联模拟数据（与 mock-data.js 一致）----
+    const POSTS = [
+      { floor:1, userName:"匿名", isAnonymous:true, isDeleted:false, content:"[size=5][b]开个帖子问问[/b][/size]\n今年计算机硕士毕业的学长学姐都去哪了？[color=red]求真实数据[/color]，不要画饼。" },
+      { floor:2, userName:"zju_cs", isAnonymous:false, isDeleted:false, content:"[quote][b]楼主[/b] 说到：\n今年计算机硕士毕业的学长学姐都去哪了？[/quote]\n周围去大厂的多，[url=https://www.cc98.org/topic/1001]看这个帖[/url]里统计过。" },
+      { floor:3, userName:"匿名", isAnonymous:true, isDeleted:false, content:"贴一张去向图：[img]https://img.cc98.org/xxx.png[/img]\n还有宣讲会录屏 [video]https://video.cc98.org/yyy.mp4[/video]" },
+      { floor:4, userName:"offer_king", isAnonymous:false, isDeleted:false, content:"[color=blue]个人观点[/color]：国企稳定但涨薪慢，大厂累但成长快。\n[align=center]关键看你要什么[/align]" },
+      { floor:5, userName:"匿名", isAnonymous:true, isDeleted:false, content:"附件里放了整理好的去向表：[upload=2]https://file.cc98.org/去向表.xlsx[/upload]" },
+      { floor:6, userName:"deleted_user", isAnonymous:false, isDeleted:true, content:"" },
+      { floor:7, userName:"路人甲", isAnonymous:false, isDeleted:false, content:"赞一个[ac01] 围观中[em02][tb01][ms01]" },
+      { floor:8, userName:"匿名", isAnonymous:true, isDeleted:false, content:"[url]https://www.cc98.org/topic/1001[/url]\n补充：部分人去做了量化/芯片/自动驾驶，方向很杂。" },
+      { floor:9, userName:"老学长", isAnonymous:false, isDeleted:false, content:"总结一句：[b][i]别只看起薪[/i][/b]，看平台和成长空间。\n[line]\n此楼已被版主标记为精华。" }
+    ];
+    const ANSWER = `## 核心观点
+- 计算机硕士去向以**大厂为主**，国企、量化、芯片等为辅。
+- 多数人建议"别只看起薪，看平台与成长"（见 9 楼）。
+
+### 不同立场
+1. 大厂派：成长快、薪资高，但累。
+2. 国企派：稳定、性价比高，但涨薪慢（见 4 楼）。
+
+> 引用：\`关键看你要什么\` —— 4 楼
+
+\`\`\`
+数据来自 5 楼附件《去向表.xlsx》
+\`\`\``;
+    const RESULTS = [
+      { id:1001, title:"计院研究生毕业都去哪了？", boardName:"就业", author:"匿名", replyCount:42 },
+      { id:1002, title:"CS硕士大厂还是国企？求建议", boardName:"就业", author:"zju_cs", replyCount:28 },
+      { id:1003, title:"今年计算机秋招行情怎么样", boardName:"水木清华", author:"匿名", replyCount:66 },
+      { id:1004, title:"算法岗 vs 开发岗 选择困难", boardName:"就业", author:"lz98", replyCount:19 }
+    ];
+
+    // ---- 渲染 ----
+    const floorsEl = document.getElementById("floors");
+    POSTS.forEach((p) => {
+      const div = document.createElement("div");
+      div.className = "card floor";
+      const author = p.isAnonymous ? "(匿名)" : p.userName;
+      const badge = p.isDeleted ? '<span class="badge">已删除</span>' : "";
+      div.innerHTML = `
+        <div class="head">${p.floor} 楼 · ${escapeHtml(author)}${badge}</div>
+        <div class="raw">${escapeHtml(p.content || "（无内容）")}</div>
+        <div class="clean">${escapeHtml(ubbToText(p.content))}</div>`;
+      floorsEl.appendChild(div);
+    });
+
+    document.getElementById("answer").innerHTML = mdToHtml(ANSWER);
+
+    const resultsEl = document.getElementById("results");
+    resultsEl.innerHTML = RESULTS.map((t) =>
+      `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+         <div style="font-weight:600">${escapeHtml(t.title)}</div>
+         <div style="color:var(--muted);font-size:12px">#${t.id} · ${escapeHtml(t.boardName)} · ${escapeHtml(t.author)} · ${t.replyCount} 回复</div>
+       </div>`).join("");
+  </script>
+</body>
+</html>

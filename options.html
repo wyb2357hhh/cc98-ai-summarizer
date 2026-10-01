@@ -43,6 +43,9 @@
     label { display: block; margin: 12px 0; }
     label .lbl { display: block; font-weight: 500; margin-bottom: 4px; font-size: 13px; }
     label .hint { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
+    label.check { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+    label.check .lbl { display: inline; margin: 0; font-weight: 600; }
+    label.check input { margin-top: 3px; accent-color: var(--accent); }
     input[type="text"], input[type="password"], input[type="number"] {
       width: 100%; padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px;
       font: inherit; background: #fbfbfe; transition: border-color .15s ease, box-shadow .15s ease;
@@ -117,53 +120,47 @@
     <h2><span class="dot"></span>防封号 / 速度限制</h2>
     <fieldset>
       <p class="note">
-        不同帖子可<b>并发</b>抓取（像多开标签页），每个帖子内部仍串行 + 随机间隔。
-        间隔越大越安全但越慢；触发限流（429/403/5xx）时自动指数退避重试。
+        速度参数已<b>硬编码</b>（如需调整请修改 <code>background.js</code> 里的 <code>RATE</code> 常量）：
+      </p>
+      <p class="note" style="line-height:2">
+        并发抓帖 <b>3</b> · 基础间隔 <b>1500ms</b> · 抖动 <b>1500ms</b> ·
+        全局最小间隔 <b>150ms</b> · <b>搜索间隔 5000ms</b> · 每页 <b>20</b> 层 ·
+        每帖最多 <b>5</b> 页 · 字符上限 <b>60000</b> · 限流重试 <b>3</b> 次
+      </p>
+      <p class="note">
+        触发限流（429/403/5xx）时仍会自动指数退避重试，连续失败自动暂停保护账号。
+      </p>
+    </fieldset>
+
+    <h2><span class="dot"></span>智能搜索</h2>
+    <fieldset>
+      <p class="note">
+        问题式搜索：先拆多组关键词检索（弥补 cc98 无模糊搜索），再抓前若干篇内容交给 AI 合成答案。
       </p>
       <div class="row">
         <label>
-          <span class="lbl">基础间隔（毫秒）</span>
-          <input type="number" id="baseDelayMs" min="0" max="60000" step="500" />
-          <span class="hint">每个帖子内部翻页的间隔</span>
+          <span class="lbl">读取帖子数（TopK）</span>
+          <input type="number" id="searchTopK" min="1" max="20" />
+          <span class="hint">抓前 N 篇内容供 AI 作答，越大越准但越慢</span>
         </label>
         <label>
-          <span class="lbl">随机抖动上限（毫秒）</span>
-          <input type="number" id="jitterMs" min="0" max="60000" step="500" />
+          <span class="lbl">候选上限</span>
+          <input type="number" id="searchMaxCandidates" min="5" max="100" />
+          <span class="hint">多关键词合并后最多保留的候选数</span>
         </label>
       </div>
-      <div class="row">
-        <label>
-          <span class="lbl">并发抓取帖子数（1–5）</span>
-          <input type="number" id="concurrency" min="1" max="5" />
-          <span class="hint">越大越快，但更接近"多线程刷"</span>
-        </label>
-        <label>
-          <span class="lbl">全局请求最小间隔（毫秒）</span>
-          <input type="number" id="globalSpacingMs" min="0" max="5000" step="100" />
-          <span class="hint">并发时防止请求同刻打出</span>
-        </label>
-      </div>
-      <div class="row">
-        <label>
-          <span class="lbl">每页楼层数（≤30）</span>
-          <input type="number" id="sizePerPage" min="1" max="30" />
-          <span class="hint">越大请求越少、越快</span>
-        </label>
-        <label>
-          <span class="lbl">每帖最大翻页数</span>
-          <input type="number" id="maxPages" min="1" max="50" />
-        </label>
-      </div>
-      <div class="row">
-        <label>
-          <span class="lbl">喂给 AI 的字符上限</span>
-          <input type="number" id="maxTotalChars" min="1000" max="200000" step="1000" />
-        </label>
-        <label>
-          <span class="lbl">限流重试次数</span>
-          <input type="number" id="maxRetries" min="1" max="10" />
-        </label>
-      </div>
+    </fieldset>
+
+    <h2><span class="dot"></span>调试</h2>
+    <fieldset>
+      <label class="check">
+        <input type="checkbox" id="debug" />
+        <span class="lbl">开启调试日志</span>
+        <span class="hint">
+          开启后，扩展会在 Service Worker 控制台（chrome://extensions → 详情 → Service Worker → 检查视图）
+          打印带 [CC98-AI] 前缀的详细日志，方便排查令牌、搜索、抓取等问题。
+        </span>
+      </label>
     </fieldset>
 
     <div class="actions">

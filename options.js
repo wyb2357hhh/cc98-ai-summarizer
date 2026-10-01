@@ -12,14 +12,9 @@ async function load() {
   $("temperature").value = s.deepseek.temperature;
   $("maxTokens").value = s.deepseek.maxTokens;
 
-  $("baseDelayMs").value = s.rate.baseDelayMs;
-  $("jitterMs").value = s.rate.jitterMs;
-  $("concurrency").value = s.rate.concurrency;
-  $("globalSpacingMs").value = s.rate.globalSpacingMs;
-  $("sizePerPage").value = s.rate.sizePerPage;
-  $("maxPages").value = s.rate.maxPages;
-  $("maxTotalChars").value = s.rate.maxTotalChars;
-  $("maxRetries").value = s.rate.maxRetries;
+  $("searchTopK").value = s.search.topK;
+  $("searchMaxCandidates").value = s.search.maxCandidates;
+  $("debug").checked = !!s.debug;
 
   // 令牌手动输入框留空（不回显），只显示状态
   $("tokenStatus").textContent = s.cc98Name
@@ -37,16 +32,11 @@ $("save").addEventListener("click", async () => {
       temperature: parseFloat($("temperature").value),
       maxTokens: num($("maxTokens").value, 2000)
     },
-    rate: {
-      baseDelayMs: num($("baseDelayMs").value, 3000),
-      jitterMs: num($("jitterMs").value, 3000),
-      concurrency: num($("concurrency").value, 2),
-      globalSpacingMs: num($("globalSpacingMs").value, 250),
-      sizePerPage: num($("sizePerPage").value, 30),
-      maxPages: num($("maxPages").value, 5),
-      maxTotalChars: num($("maxTotalChars").value, 60000),
-      maxRetries: num($("maxRetries").value, 3)
-    }
+    search: {
+      topK: num($("searchTopK").value, 8),
+      maxCandidates: num($("searchMaxCandidates").value, 40)
+    },
+    debug: $("debug").checked
   };
   if (Number.isNaN(patch.deepseek.temperature)) patch.deepseek.temperature = 0.3;
   // 手动令牌：仅当填写时才覆盖

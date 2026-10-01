@@ -3,7 +3,7 @@
 // 职责：悬浮面板（扫描本页勾选 → 主题输入）+ 独立大悬浮窗（Markdown 渲染输出）
 // ============================================================================
 
-(() => {
+(async () => {
   if (window.__cc98_ai_injected) return;
   window.__cc98_ai_injected = true;
 
@@ -14,7 +14,9 @@
     sessionId: null,       // 当前会话 id（追问用）
     committed: "",         // 已完成答复的拼接文档（Markdown）
     raw: "",               // 正在流式生成的回复
-    outVisible: false
+    refs: "",              // 参考帖链接块（固定放在最末尾）
+    outVisible: false,
+    debug: false           // 调试模式
   };
 
   // -------------------------------------------------------------------------
@@ -60,8 +62,17 @@
     }
     try {
       const s = await chrome.runtime.sendMessage({ type: "GET_STATE" });
-      if (s && s.tokenSet) setTokenStatus("已就绪：" + (s.cc98Name || ""));
-      else setTokenStatus("未获取令牌（浏览 cc98 页面自动获取，或到选项页手动填写）");
+      if (s) {
+        state.debug = !!s.settings && s.settings.debug;
+        // 用设置里的默认抓取条数初始化面板输入框
+        if (s.settings && s.settings.search && s.settings.search.topK) {
+          $("cc98-ai-topk").value = s.settings.search.topK;
+        }
+        if (s.tokenSet) setTokenStatus("已就绪：" + (s.cc98Name || ""));
+        else setTokenStatus("未获取令牌（浏览 cc98 页面自动获取，或到选项页手动填写）");
+      } else {
+        setTokenStatus("状态未知");
+      }
     } catch (e) {
       setTokenStatus("状态未知");
     }
@@ -172,10 +183,58 @@
   // -------------------------------------------------------------------------
   // UI 构建
   // -------------------------------------------------------------------------
-  const root = document.createElement("div");
-  root.id = "cc98-ai-root";
+  // 用 Shadow DOM 隔离宿主页面的样式。
+  // 原因：Dark Reader 这类扩展会解析并改写页面元素的颜色，而它们不进入 shadow root，
+  // 因此面板配色完全由我们自己的 CSS 决定，不会再出现"文字浅色 / 背景被刷白"的错乱。
+  let cssText = "";
+  try {
+    cssText = await (await fetch(chrome.runtime.getURL("content.css"))).text();
+  } catch (e) { /* 取不到就退化为普通 DOM，改用 manifest 注入的 CSS */ }
+
+  let root, varStyleTarget;
+  if (cssText) {
+    const host = document.createElement("div");
+    host.id = "cc98-ai-host";
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `<style>${cssText}</style><div id="cc98-ai-root"></div>`;
+    root = shadow.getElementById("cc98-ai-root");
+    document.documentElement.appendChild(host);
+    varStyleTarget = host; // 自定义属性会从 host 继承进 shadow
+  } else {
+    root = document.createElement("div");
+    root.id = "cc98-ai-root";
+    document.documentElement.appendChild(root);
+    varStyleTarget = root;
+  }
   root.innerHTML = `
-    <button id="cc98-ai-fab" type="button" title="CC98 AI 总结"></button>
+    <!-- 看板娘（点击展开面板）。自带占位小人；若 assets/mascot.png 存在会自动替换 -->
+    <div id="cc98-ai-mascot" title="CC98 AI 总结（点击展开面板）" data-state="idle">
+      <svg class="cc98-ai-mascot-ph" viewBox="0 0 100 130" aria-hidden="true">
+        <ellipse cx="17" cy="52" rx="9" ry="21" fill="#d9dceb"/>
+        <ellipse cx="83" cy="52" rx="9" ry="21" fill="#d9dceb"/>
+        <ellipse cx="50" cy="42" rx="28" ry="30" fill="#e8ebf6"/>
+        <ellipse cx="50" cy="46" rx="21" ry="20" fill="#ffeadf"/>
+        <path d="M29 38 Q50 15 71 38 Q60 29 50 31 Q40 29 29 38Z" fill="#e8ebf6"/>
+        <ellipse cx="41" cy="48" rx="4" ry="5.5" fill="#3b3f57"/>
+        <ellipse cx="59" cy="48" rx="4" ry="5.5" fill="#3b3f57"/>
+        <circle cx="42.5" cy="45.8" r="1.4" fill="#fff"/>
+        <circle cx="60.5" cy="45.8" r="1.4" fill="#fff"/>
+        <ellipse cx="34" cy="54" rx="4" ry="2.4" fill="#ffc2cf" opacity=".85"/>
+        <ellipse cx="66" cy="54" rx="4" ry="2.4" fill="#ffc2cf" opacity=".85"/>
+        <path d="M47 55 q3 3 6 0" stroke="#c98b8b" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+        <path d="M50 66 q17 2 20 27 q0 8 -6 8 h-28 q-6 0 -6 -8 q3 -25 20 -27Z" fill="url(#cc98-mg)"/>
+        <circle cx="50" cy="57" r="3.2" fill="#e05a78"/>
+        <path d="M47 57 l-6 -3 v6Z" fill="#e05a78"/>
+        <path d="M53 57 l6 -3 v6Z" fill="#e05a78"/>
+        <defs>
+          <linearGradient id="cc98-mg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#7b8cff"/>
+            <stop offset="1" stop-color="#6a54e8"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+    <div id="cc98-ai-bubble" hidden></div>
 
     <!-- 控制面板 -->
     <div id="cc98-ai-panel" hidden>
@@ -185,39 +244,57 @@
         <button id="cc98-ai-close" type="button" title="关闭">×</button>
       </div>
       <div class="cc98-ai-body">
-        <div class="cc98-ai-row">
-          <button id="cc98-ai-scan-btn" type="button" class="cc98-ai-scan-btn">扫描本页帖子</button>
-          <button id="cc98-ai-clear" type="button" title="清空勾选">清空</button>
+        <!-- ① 问题搜索（主功能，常显） -->
+        <div class="cc98-ai-sec">
+          <div class="cc98-ai-sec-title">问题搜索</div>
+          <div class="cc98-ai-row">
+            <input type="text" id="cc98-ai-q" placeholder="输入问题，自动搜索并作答" />
+            <input type="number" id="cc98-ai-topk" value="8" min="1" max="20" class="cc98-num" title="抓取前 N 篇帖子内容用于作答" />
+          </div>
+          <button id="cc98-ai-search" type="button" class="cc98-btn cc98-btn-primary cc98-btn-block">搜索并作答</button>
         </div>
-        <div class="cc98-ai-row">
-          <button id="cc98-ai-load" type="button" class="cc98-ai-scan-btn" title="自动滚到底触发加载，直到目标条数">自动加载更多</button>
-          <input type="number" id="cc98-ai-loadn" value="60" min="20" max="1000" class="cc98-num" />
-          <span>条</span>
+
+        <!-- ② 勾选帖子（次要，可折叠；默认折叠） -->
+        <div class="cc98-ai-sec">
+          <button class="cc98-ai-sec-head" id="cc98-ai-sec-toggle" type="button" aria-expanded="false">
+            <span class="cc98-ai-caret">▸</span>
+            <span class="cc98-ai-sec-name">勾选帖子</span>
+            <span class="cc98-ai-sec-badge" id="cc98-ai-count">已选 0</span>
+          </button>
+          <div class="cc98-ai-sec-body" id="cc98-ai-sec-body" hidden>
+            <div class="cc98-ai-row">
+              <button id="cc98-ai-scan-btn" type="button" class="cc98-btn cc98-btn-block">扫描本页</button>
+              <button id="cc98-ai-load" type="button" class="cc98-btn" title="自动滚到底加载，直到目标条数">自动加载</button>
+              <input type="number" id="cc98-ai-loadn" value="60" min="20" max="1000" class="cc98-num" title="自动加载的目标条数" />
+            </div>
+            <div id="cc98-ai-list" class="cc98-ai-list"></div>
+            <div class="cc98-ai-tools">
+              <span id="cc98-ai-list-title" class="cc98-ai-tools-label">本页帖子</span>
+              <div class="cc98-ai-tools-right">
+                <button id="cc98-ai-pick" type="button" class="cc98-btn-text" title="勾选前 N 篇">前</button>
+                <input type="number" id="cc98-ai-pickn" value="5" min="1" max="999" class="cc98-num-inline" />
+                <span class="cc98-ai-tools-label">篇</span>
+                <label class="cc98-ai-selectall" title="勾选/取消全部">
+                  <input type="checkbox" id="cc98-ai-selectall" /> 全选
+                </label>
+                <button id="cc98-ai-clear" type="button" class="cc98-btn-text" title="清空勾选">清空</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <p class="cc98-ai-hint">在论坛搜索页 / 版面页打开，勾选要总结的帖子</p>
 
-        <div class="cc98-ai-list-head">
-          <span id="cc98-ai-list-title">本页帖子</span>
-          <span class="cc98-ai-list-tools">
-            <button id="cc98-ai-pick" type="button" class="cc98-small" title="勾选本页前 N 篇">前</button>
-            <input type="number" id="cc98-ai-pickn" value="5" min="1" max="999" class="cc98-num" />
-            <span>篇</span>
-            <label class="cc98-ai-selectall" title="勾选/取消本页全部帖子">
-              <input type="checkbox" id="cc98-ai-selectall" /> 全选
-            </label>
-            <span id="cc98-ai-count">已选 0</span>
-          </span>
-        </div>
-        <div id="cc98-ai-list" class="cc98-ai-list"></div>
-
-        <textarea id="cc98-ai-topic" rows="2" placeholder="总结主题，例如：这个专业就业怎么样"></textarea>
-
-        <div class="cc98-ai-row">
-          <button id="cc98-ai-start" type="button" class="primary">开始总结</button>
-          <button id="cc98-ai-stop" type="button">停止</button>
+        <!-- ③ 主题总结（主功能，常显） -->
+        <div class="cc98-ai-sec">
+          <div class="cc98-ai-sec-title">主题总结</div>
+          <textarea id="cc98-ai-topic" rows="2" placeholder="总结主题，例如：这个专业就业怎么样"></textarea>
+          <div class="cc98-ai-row">
+            <button id="cc98-ai-start" type="button" class="cc98-btn cc98-btn-primary cc98-btn-block">开始总结</button>
+            <button id="cc98-ai-stop" type="button" class="cc98-btn-text">停止</button>
+          </div>
         </div>
 
         <div class="cc98-ai-progress">
+          <div id="cc98-ai-stage" class="cc98-ai-stage"></div>
           <div class="bar"><div id="cc98-ai-progress-fill"></div></div>
           <div id="cc98-ai-progress-msg" class="msg"></div>
         </div>
@@ -232,6 +309,10 @@
         <button id="cc98-ai-out-copy" type="button">复制 Markdown</button>
         <button id="cc98-ai-out-close" type="button" title="关闭">×</button>
       </div>
+      <div class="cc98-ai-out-progress" id="cc98-ai-out-progress">
+        <div class="cc98-ai-out-stage" id="cc98-ai-out-progress-msg"></div>
+        <div class="bar"><div id="cc98-ai-out-progress-fill"></div></div>
+      </div>
       <div id="cc98-ai-out-body" class="cc98-ai-out-body">
         <div class="cc98-ai-md"></div>
       </div>
@@ -241,7 +322,7 @@
       </div>
     </div>
   `;
-  document.documentElement.appendChild(root);
+  // 注意：root 已在上面的分支里挂载（shadow 内或 documentElement 下），此处不再 append
 
   const $ = (id) => root.querySelector("#" + id);
   const panel = $("cc98-ai-panel");
@@ -252,11 +333,67 @@
   // -------------------------------------------------------------------------
   // 事件
   // -------------------------------------------------------------------------
-  $("cc98-ai-fab").addEventListener("click", () => {
+  $("cc98-ai-mascot").addEventListener("click", () => {
     panel.hidden = !panel.hidden;
     if (!panel.hidden) { detectAndSend(); autoScan(); }
+    mascotSay("", 0);
   });
+
+  // ---- 看板娘：真图探测 + 状态机 ----
+  const MASCOT_STATES = {
+    idle:  ["", "在的哦～", "点我打开面板"],
+    work:  ["在翻了在翻了…", "等我一下下", "正在读帖子…"],
+    done:  ["找到啦！", "整理好了～", "看结果吧"],
+    error: ["唔…出错了", "这个没搜到呢", "再试一次？"]
+  };
+  const mascotEl = $("cc98-ai-mascot");
+  const bubbleEl = $("cc98-ai-bubble");
+  let mascotTimer = null;
+
+  function mascotSay(text, ms) {
+    if (!text || !ms) { bubbleEl.hidden = true; clearTimeout(mascotTimer); return; }
+    bubbleEl.textContent = text;
+    bubbleEl.hidden = false;
+    clearTimeout(mascotTimer);
+    mascotTimer = setTimeout(() => (bubbleEl.hidden = true), ms);
+  }
+
+  function setMascotState(st, sayMs) {
+    mascotEl.dataset.state = st;
+    const pool = MASCOT_STATES[st] || MASCOT_STATES.idle;
+    const text = pool[Math.floor(Math.random() * pool.length)];
+    mascotSay(text, sayMs || 2600);
+    // 完成/出错是瞬时状态，过一会儿回到待机
+    if (st === "done" || st === "error") {
+      setTimeout(() => { if (mascotEl.dataset.state === st) mascotEl.dataset.state = "idle"; }, 2600);
+    }
+  }
+
+  // 若扩展内存在 assets/mascot.png，自动替换掉内置占位小人
+  (function probeMascotImage() {
+    try {
+      const url = chrome.runtime.getURL("assets/mascot.png");
+      const img = new Image();
+      img.onload = () => {
+        varStyleTarget.style.setProperty("--cc98-mascot-img", `url("${url}")`);
+        mascotEl.classList.add("has-img");
+      };
+      img.onerror = () => { /* 没有真图就用内置占位小人 */ };
+      img.src = url;
+    } catch (e) { /* 忽略 */ }
+  })();
   $("cc98-ai-close").addEventListener("click", () => (panel.hidden = true));
+
+  // 折叠/展开「勾选帖子」区块
+  function setPickExpanded(open) {
+    $("cc98-ai-sec-body").hidden = !open;
+    $("cc98-ai-sec-toggle").setAttribute("aria-expanded", open ? "true" : "false");
+    $("cc98-ai-sec-toggle").classList.toggle("open", open);
+  }
+  $("cc98-ai-sec-toggle").addEventListener("click", () => {
+    setPickExpanded($("cc98-ai-sec-body").hidden);
+  });
+
   $("cc98-ai-scan-btn").addEventListener("click", autoScan);
   $("cc98-ai-load").addEventListener("click", autoLoadMore);
   $("cc98-ai-selectall").addEventListener("change", (e) => {
@@ -278,6 +415,10 @@
     setStatus("正在停止…");
   });
   $("cc98-ai-start").addEventListener("click", startSummarize);
+  $("cc98-ai-search").addEventListener("click", doQuestionSearch);
+  $("cc98-ai-q").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); doQuestionSearch(); }
+  });
 
   // 快速选中前 N 条
   $("cc98-ai-pick").addEventListener("click", () => {
@@ -302,7 +443,7 @@
   $("cc98-ai-out-close").addEventListener("click", () => { outEl.hidden = true; state.outVisible = false; });
   $("cc98-ai-out-copy").addEventListener("click", async () => {
     try {
-      const doc = state.committed + (state.raw ? "\n\n" + state.raw : "");
+      const doc = state.committed + (state.raw ? "\n\n" + state.raw : "") + state.refs;
       await navigator.clipboard.writeText(doc || "");
       outStatus("已复制");
       setTimeout(() => outStatus(state.running ? "生成中…" : "完成，可继续追问"), 1500);
@@ -317,6 +458,7 @@
     if (msg.type === "PROGRESS") onProgress(msg);
     else if (msg.type === "STREAM_DELTA") onStreamDelta(msg.delta || "");
     else if (msg.type === "RESULT") onResult(msg);
+    else if (msg.type === "SEARCH_RESULT") onSearchResult(msg);
     else if (msg.type === "FOLLOWUP_DONE") onFollowupDone();
     else if (msg.type === "ERROR") onError(msg.message);
   });
@@ -371,11 +513,12 @@
     autoScan();
   }
 
-  function renderList(topics) {
+  function renderList(topics, label) {
     state.topics = topics || [];
+    $("cc98-ai-list-title").textContent = label || "本页帖子";
     listEl.innerHTML = "";
     if (!state.topics.length) {
-      listEl.innerHTML = '<div class="cc98-ai-empty">本页没有识别到帖子链接</div>';
+      listEl.innerHTML = '<div class="cc98-ai-empty">' + (label === "参考帖" ? "没有搜到相关帖子" : "本页没有识别到帖子链接") + '</div>';
       refreshCount();
       return;
     }
@@ -423,6 +566,44 @@
     $("cc98-ai-count").textContent = "已选 " + state.selected.size;
   }
 
+  // 问题式搜索：用户给问题 → 后台拆关键词搜索 + AI 生成答案 + 参考帖回填
+  async function doQuestionSearch() {
+    const q = $("cc98-ai-q").value.trim();
+    if (!q) return setStatus("请先输入问题");
+    if (state.running) return;
+    log("发起问题搜索：", q);
+
+    state.running = true;
+    state.sessionId = null;
+    state.committed = "";
+    state.raw = "";
+    state.refs = "";
+    state.selected.clear();
+    refreshChecks();
+
+    $("cc98-ai-search").disabled = true;
+    $("cc98-ai-start").disabled = true;
+    $("cc98-ai-ask").disabled = true;
+
+    setProgress(3, "正在拆解关键词…");
+    setStatus("");
+    showOut();
+    $("cc98-ai-out-progress-fill").style.width = "0%";
+    $("cc98-ai-out-progress-msg").textContent = "准备中…";
+    $("cc98-ai-out-title").textContent = q;
+    setMascotState("work", 2600);
+    outStatus("搜索中…");
+    outBody.innerHTML = '<div class="cc98-ai-md"><p class="cc98-ai-md-empty">正在搜索并分析…</p></div>';
+
+    const topK = Math.max(1, Math.min(20, parseInt($("cc98-ai-topk").value, 10) || 8));
+    try {
+      const r = await chrome.runtime.sendMessage({ type: "QUESTION_SEARCH", question: q, topK });
+      if (r && r.error) { onError(r.error); return; }
+    } catch (e) {
+      onError(e.message || String(e));
+    }
+  }
+
   async function startSummarize() {
     const topic = $("cc98-ai-topic").value.trim();
     if (!topic) return setStatus("请先输入总结主题");
@@ -434,14 +615,19 @@
     state.sessionId = null;
     state.committed = "";
     state.raw = "";
+    state.refs = "";
     $("cc98-ai-start").disabled = true;
+    $("cc98-ai-search").disabled = true;
     setProgress(1, "准备开始…");
     setStatus("");
 
     $("cc98-ai-ask").disabled = true;
     // 打开输出窗占位
     showOut();
+    $("cc98-ai-out-progress-fill").style.width = "0%";
+    $("cc98-ai-out-progress-msg").textContent = "准备中…";
     $("cc98-ai-out-title").textContent = topic;
+    setMascotState("work", 2600);
     outStatus("抓取帖子中…");
     outBody.innerHTML = '<div class="cc98-ai-md"><p class="cc98-ai-md-empty">正在限速抓取选中帖子…</p></div>';
 
@@ -453,9 +639,19 @@
     }
   }
 
+  // 进度同时显示在控制面板和输出窗（用户要求进度放在回答框里）
   function onProgress(msg) {
+    if (msg.stageLabel) {
+      $("cc98-ai-stage").textContent = `步骤 ${msg.stage}/${msg.stageTotal} · ${msg.stageLabel}`;
+      $("cc98-ai-out-progress-msg").textContent = `步骤 ${msg.stage}/${msg.stageTotal} · ${msg.stageLabel} — ${msg.message || ""}`;
+    } else if (msg.message) {
+      $("cc98-ai-out-progress-msg").textContent = msg.message;
+    }
+    const pct = Math.max(0, Math.min(100, msg.percent || 0));
+    $("cc98-ai-out-progress-fill").style.width = pct + "%";
     setProgress(msg.percent || 0, msg.message || "");
     if (msg.phase === "crawl" && state.running) outStatus("抓取中…");
+    if (mascotEl.dataset.state !== "work") setMascotState("work", 2600);
   }
 
   // 每一轮 AI 回复采用“最终文档 committed + 正在流式渲染的 raw”拼接展示，
@@ -467,18 +663,67 @@
     renderOut();
   }
 
+  // 生成"参考帖"链接列表，保证每条都能点开原帖
+  function refBlock(topics) {
+    const list = (topics || []).filter((t) => t && t.id);
+    if (!list.length) return "";
+    const items = list
+      .map((t) => {
+        const title = String(t.title || ("帖子 #" + t.id)).replace(/[[\]]/g, "");
+        return `- [${title}](https://www.cc98.org/topic/${t.id})`;
+      })
+      .join("\n");
+    return "\n\n---\n\n**参考帖（点击查看原帖）**\n" + items;
+  }
+
   // 首轮总结结束：以 RESULT.summary 作为完整首轮答案固化
   function onResult(msg) {
+    log("收到 RESULT");
     state.running = false;
     $("cc98-ai-start").disabled = false;
+    $("cc98-ai-search").disabled = false;
     state.sessionId = msg.sessionId || null;
     state.committed = msg.summary || (state.raw || "");
+    state.refs = refBlock(msg.refTopics);
     state.raw = "";
     showOut();
     outStatus("完成，可继续追问");
     renderOut();
     setProgress(100, "完成");
+    setStage("");
+    outProgressDone();
     enableAsk();
+    setMascotState("done");
+  }
+
+  // 问题式搜索完成：答案固化 + 参考帖回填列表 + 允许追问
+  function onSearchResult(msg) {
+    log("收到 SEARCH_RESULT：参考帖", (msg.topics || []).length);
+    state.running = false;
+    $("cc98-ai-start").disabled = false;
+    $("cc98-ai-search").disabled = false;
+    state.sessionId = msg.sessionId || null; // 搜索也建了会话，可以继续追问
+    state.committed = msg.answer || (state.raw || "");
+    state.refs = refBlock(msg.refTopics || msg.topics);
+    state.raw = "";
+    state.topics = Array.isArray(msg.topics) ? msg.topics : [];
+    renderList(state.topics, "参考帖");
+    if (state.topics.length) setPickExpanded(true); // 有参考帖就自动展开该区块
+    showOut();
+    outStatus("完成，可继续追问");
+    renderOut();
+    setProgress(100, "完成");
+    setStage("完成");
+    outProgressDone();
+    setStatus(`搜索完成：${state.topics.length} 篇参考帖已列出，可勾选后「开始总结」`);
+    enableAsk();
+    setMascotState("done");
+  }
+
+  // 输出窗进度收尾
+  function outProgressDone() {
+    $("cc98-ai-out-progress-fill").style.width = "100%";
+    $("cc98-ai-out-progress-msg").textContent = "完成";
   }
 
   // 追问完成后，把流式内容固化进文档
@@ -487,9 +732,12 @@
     state.raw = "";
     state.running = false;
     $("cc98-ai-start").disabled = false;
+    $("cc98-ai-search").disabled = false;
     enableAsk();
     outStatus("完成，可继续追问");
+    outProgressDone();
     renderOut();
+    setMascotState("done");
   }
 
   // 追问开始于提交时：写入“你的追问”段落并清空 raw
@@ -499,13 +747,18 @@
   }
 
   function onError(message) {
+    log("收到 ERROR：", message);
     state.running = false;
     $("cc98-ai-start").disabled = false;
+    $("cc98-ai-search").disabled = false;
     showOut();
     outStatus("已中断");
     renderOut();
     setProgress(0, "");
+    setStage("");
+    $("cc98-ai-out-progress-msg").textContent = "已中断";
     setStatus("错误：" + message);
+    setMascotState("error");
   }
 
   function enableAsk() {
@@ -525,6 +778,9 @@
     state.raw = "";
     showOut();
     outStatus("生成中…");
+    $("cc98-ai-out-progress-msg").textContent = "正在回答追问…";
+    $("cc98-ai-out-progress-fill").style.width = "50%";
+    setMascotState("work", 2600);
     renderOut();
     setStatus("");
     try {
@@ -549,10 +805,10 @@
     $("cc98-ai-out-status").textContent = text;
   }
 
-  // 渲染：把最终文案 + （若有）流式中的回复一并转成 MD
+  // 渲染：最终文案 + （若有）流式中的回复 + 末尾固定的参考帖块
   function renderOut() {
     const nearBottom = outBody.scrollHeight - outBody.scrollTop - outBody.clientHeight < 80;
-    const doc = state.committed + (state.raw ? "\n\n" + state.raw : "");
+    const doc = state.committed + (state.raw ? "\n\n" + state.raw : "") + state.refs;
     const html = doc ? mdToHtml(doc) : '<div class="cc98-ai-md"><p class="cc98-ai-md-empty">等待回复…</p></div>';
     outBody.innerHTML = '<div class="cc98-ai-md">' + html + "</div>";
     if (nearBottom) outBody.scrollTop = outBody.scrollHeight;
@@ -573,6 +829,15 @@
 
   function sleep(ms) {
     return new Promise((res) => setTimeout(res, ms));
+  }
+
+  function log(...args) {
+    if (state.debug) console.log("[CC98-AI]", ...args);
+  }
+
+  function setStage(text) {
+    const el = $("cc98-ai-stage");
+    if (el) el.textContent = text || "";
   }
 
   // -------------------------------------------------------------------------

@@ -12,6 +12,12 @@
   "background": {
     "service_worker": "background.js"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/*", "content.css"],
+      "matches": ["*://*.cc98.org/*"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": ["*://*.cc98.org/*"],
