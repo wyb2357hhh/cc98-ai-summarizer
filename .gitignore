@@ -1,7 +1,3 @@
-# 看板娘图片：版权角色素材，不入公开仓库。
-# 代码内置了占位小人 SVG；想换形象就自己放一张透明背景 PNG 到 assets/mascot.png。
-assets/mascot.png
-
 # 系统 / 编辑器垃圾
 Thumbs.db
 Desktop.ini
